@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include <SPI.h>
 #include <RH_NRF24.h>
 #include <Servo.h>
@@ -7,7 +8,7 @@
 #define DEAD_ZONE 80
 
 // I2C
-volatile boolean receiveFlag = true;
+volatile boolean receiveFlag = false;
 char temp[BUFFER_LENGTH];
 String command;
 
@@ -21,11 +22,11 @@ Servo ESC;
 // Joystick input
 int xValue = 0;
 int yValue = 0;
-boolean isReceiving = false;
+boolean isReceiving = true;
 
 // PID parameters
-double Kp = 0.1;
-double Ki = 0.0002;
+double Kp = 0.25;
+double Ki = 0.0000;
 double Kd = 0;
 
 // PID variables
@@ -45,7 +46,10 @@ void setup()
   Wire.begin(SLAVE_ADDRESS);
   Wire.onReceive(receiveEvent);
 
+  // Initialize serial communication
   Serial.begin(9600);
+  while (!Serial)
+    ;
 
   // Initialize NRF24 radio
   if (!nrf24.init())
@@ -57,9 +61,10 @@ void setup()
 
   // Attach servo and ESC
   servo.attach(9);
-  servo.write(90);
+  servo.write(80);
   ESC.attach(5);
   ESC.writeMicroseconds(1000);
+  delay(5000);
   Serial.read();
 }
 
@@ -119,24 +124,24 @@ void adjustServoAndESC()
 {
   if (xValue < 320 - DEAD_ZONE)
   {
-    servo.write(map(xValue, 0, 320 - DEAD_ZONE, 50, 90));
+    servo.write(map(xValue, 0, 320 - DEAD_ZONE, 50, 80));
   }
   else if (xValue > 320 + DEAD_ZONE)
   {
-    servo.write(map(xValue, 320 + DEAD_ZONE, 640, 90, 130));
+    servo.write(map(xValue, 320 + DEAD_ZONE, 640, 80, 130));
   }
   else
   {
-    servo.write(90);
+    servo.write(80);
   }
 
   if (yValue > 320 + DEAD_ZONE)
   {
-    ESC.writeMicroseconds(map(yValue, 320 + DEAD_ZONE, 640, 1000, 2000));
+    ESC.writeMicroseconds(map(yValue, 320 + DEAD_ZONE, 640, 500, 2000));
   }
   else
   {
-    ESC.writeMicroseconds(1000);
+    ESC.writeMicroseconds(0);
   }
 }
 
@@ -147,12 +152,12 @@ void receiveDataAndPerformPID()
   if (receiveFlag)
   {
     String data(temp);
+    Serial.println(data);
     receiveFlag = false;
 
-    // Update setpoint and current position
+   // Update setpoint and current position
     currentPos = data.toInt();
     setpoint = 160;
-
 
     // Calculate error
     double error = setpoint - currentPos;
@@ -162,13 +167,11 @@ void receiveDataAndPerformPID()
     integral += Ki * error;
     double derivative = Kd * (error - previousError);
 
-    // Calculate PID output
+//    // Calculate PID output
     double output = proportional + integral + derivative;
 
     // Update servo angle
-    int servoAngle = 90 - output;
-    Serial.println(output);
-    Serial.println(servoAngle);
+    int servoAngle = 80 + output;
     servo.write(servoAngle);
 
     // Update previous error for the next iteration
