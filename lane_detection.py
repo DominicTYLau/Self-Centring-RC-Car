@@ -4,12 +4,9 @@ from picamera2 import Picamera2
 import math
 import smbus
 import time
-# for RPI version 1, use bus = smbus.SMBus(0)
+
 bus = smbus.SMBus(1)
-
-# This is the address we setup in the Arduino Program
 address = 0x08
-
 
 
 # Initialize the camera
@@ -27,7 +24,6 @@ def writeData(value):
         bus.write_i2c_block_data(address, 0x00, byteValue)
     except OSError as e:
         print(f"I2C Error: {e}")
-        # Add additional debugging information or actions if needed
     return -1
 
 
@@ -38,12 +34,12 @@ def StringToBytes(val):
         return retVal
 
 def process_image(image):
-    # Apply Canny edge detection
-    canny_image = cv2.Canny(image, 85, 85)
+    gauss_image = cv2.GaussianBlur(image, (5,5),0)
+    canny_image = cv2.Canny(gauss_image, 50, 150)
 
     # Define the region of interest
     height, width = image.shape
-    polygons = np.array([[(0, height), (width * (1/4), 290), (width * (3/4), 290), (width, height)]], dtype=np.int32)
+    polygons = np.array([[(0, height), (0, 270), (width, 270), (width, height)]], dtype=np.int32)
     mask = np.zeros_like(image)
     cv2.fillPoly(mask, polygons, 255)
     return cv2.bitwise_and(canny_image, mask)
@@ -67,7 +63,7 @@ while True:
     cropped_image = process_image(lane_image)
     
     # Detect lines using Hough transform
-    lines = cv2.HoughLinesP(cropped_image, 50, np.pi/120, 50, np.array([]), minLineLength=4, maxLineGap=3)
+    lines = cv2.HoughLinesP(cropped_image, 1, np.pi/180, 50, np.array([]), minLineLength=10, maxLineGap=3)
 
     if lines is not None:
         left_line_x = []
@@ -105,57 +101,64 @@ while True:
             
             right_x_start = right_x_end = lane_image.shape[1]
         
-        mid_x_start = int((left_x_start + right_x_start)/2)
-        mid_x_end = int((left_x_end + right_x_end)/2)
-        
-        mid_y = 310
-        
-        if (min_y - max_y) != 0:
-            mid_slope = (mid_x_end - mid_x_start) / (min_y - max_y)
-        else:
-        # Handle the case where the lines are perfectly horizontal
-            mid_slope = 0
-
-    # y-intercept
-        b = min_y - mid_slope * mid_x_end
-        
-    
-        
-    # Check if the denominator is zero before performing the division
-        if mid_slope != 0:
-            x = int((mid_y - b) / mid_slope)
-            print(x)
-            writeData(str(x))
-        else:
-            print("160")
-            writeData("160")	
-        
         line_image = displayLines(
             lane_image,
             [[
                 [left_x_start, max_y, left_x_end, min_y],
                 [right_x_start, max_y, right_x_end, min_y],
-                [mid_x_start, max_y, mid_x_end, min_y],
             ]],
             thickness = 10,
-        )   
+        )
+        
+        if left_x_start != left_x_end and right_x_start != right_x_end:
+            left_slope = (min_y - max_y) / (left_x_end - left_x_start)
+            right_slope = (min_y - max_y) / (right_x_end - right_x_start)
+            
+            left_intercept = min_y - left_slope * left_x_end
+            right_intercept = min_y - right_slope * right_x_end
+            
+            if left_slope - right_slope != 0:
+                intersection_x = (right_intercept - left_intercept) / (left_slope - right_slope)
+                intersection_y = left_slope * intersection_x + left_intercept
+                
+                intersection_point = (int(intersection_x), int(intersection_y))
+                print("Intersection point:", intersection_point)
+                writeData(str(int(intersection_x)))
+                cv2.circle(line_image, intersection_point, 5, (0, 255, 0), -1) # Draw intersection point
+        else:
+
+            mid_x_start = int((left_x_start + right_x_start)/2)
+            mid_x_end = int((left_x_end + right_x_end)/2)
+            
+            mid_y = 310
+            
+            if (min_y - max_y) != 0:
+                mid_slope = (mid_x_end - mid_x_start) / (max_y - min_y)
+                print(mid_slope)
+            else:
+                mid_slope = 0
+
+            b = min_y - mid_slope * mid_x_end
+                  
+        # Check if the denominator is zero before performing the division
+            if mid_slope != 0:
+                x = int((mid_y - b) / mid_slope)
+                print(x)
+                writeData(str(x))
+            else:
+                print("160")
+                writeData("160")
 
         # Combine the original image with the line image
         combo_image = cv2.addWeighted(lane_image, 0.8, line_image, 1, 0)
 
         # Display the resulting image
-        cv2.imshow("result", combo_image)
+        cv2.imshow("roi", cropped_image)
+        cv2.imshow("new", combo_image)
 
     # Break the loop if 'q' is pressed
     if cv2.waitKey(1) == ord('q'):
         break
 
-# When everything is done, release the capture
 piCam.stop_preview()
 cv2.destroyAllWindows()
-
-
-
-
-
-
